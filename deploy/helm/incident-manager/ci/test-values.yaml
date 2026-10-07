@@ -1,0 +1,10 @@
+# Values used by CI for `helm lint` and `helm template`; not a deployable configuration.
+postgres:
+  backup:
+    destinationPath: s3://example-incident-manager-backups/cnpg
+    iamRoleArn: arn:aws:iam::123456789012:role/incident-manager-db-backup
+  podMonitor:
+    enabled: true
+metrics:
+  serviceMonitor:
+    enabled: true

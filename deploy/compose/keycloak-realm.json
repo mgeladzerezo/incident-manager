@@ -1,0 +1,72 @@
+{
+  "realm": "incident",
+  "enabled": true,
+  "sslRequired": "none",
+  "roles": {
+    "realm": [
+      { "name": "responder", "description": "Acknowledge and resolve incidents" },
+      { "name": "manager", "description": "Manage schedules and escalation policies" },
+      { "name": "admin", "description": "Manage users" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "incident-manager",
+      "name": "Incident Manager",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:5174/*"],
+      "webOrigins": ["http://localhost:5174"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5174/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "incident-manager-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "incident-manager",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@example.com",
+      "firstName": "Alice",
+      "lastName": "Responder",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["responder"]
+    },
+    {
+      "username": "mona",
+      "email": "mona@example.com",
+      "firstName": "Mona",
+      "lastName": "Manager",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["manager"]
+    },
+    {
+      "username": "adam",
+      "email": "adam@example.com",
+      "firstName": "Adam",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["admin"]
+    }
+  ]
+}

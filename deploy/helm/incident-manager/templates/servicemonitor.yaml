@@ -1,0 +1,50 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "im.fullname" . }}
+  labels:
+    {{- include "im.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [api, worker]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "im.fullname" . }}
+  labels:
+    {{- include "im.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: incident-manager
+      rules:
+        # The pager itself is broken: route this alert somewhere that does not depend on it.
+        - alert: IncidentManagerWorkerStalled
+          expr: time() - max(incident_manager_worker_last_tick_timestamp_seconds) > 60
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: No escalation worker has completed a pass for over a minute.
+        - alert: IncidentManagerPageDeliveryFailing
+          expr: sum by (channel) (rate(incident_manager_pages_total{result="error"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Pages on {{ "{{ $labels.channel }}" }} are failing to send.
+{{- end }}

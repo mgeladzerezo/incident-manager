@@ -1,0 +1,25 @@
+# Alertmanager receiver for the incident manager.
+#
+# Grouping happens in the incident manager, so Alertmanager is told to forward quickly and
+# keep resolved notifications on: an incident closes itself only when it has seen every one
+# of its alerts resolve.
+route:
+  receiver: incident-manager
+  group_by: ["alertname", "service"]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h
+
+receivers:
+  - name: incident-manager
+    webhook_configs:
+      - url: https://incidents.example.com/api/v1/webhooks/alertmanager
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/secrets/incident-manager-webhook-token
+
+# To route an alert to a specific escalation policy, add the label in the alerting rule:
+#   labels:
+#     escalation_policy: database

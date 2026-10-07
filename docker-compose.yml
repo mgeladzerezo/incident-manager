@@ -1,0 +1,90 @@
+# Local development stack. Credentials here are throwaway values for a laptop.
+#
+#   docker compose up --build
+#   UI        http://localhost:5174   (alice / mona / adam, password "password")
+#   API docs  http://localhost:8104/docs
+#   Keycloak  http://localhost:8080   (admin / admin)
+#   Mail      http://localhost:8025
+
+x-backend: &backend
+  build: ./backend
+  environment:
+    IM_DATABASE_URL: postgresql+psycopg://incident:incident@postgres:5432/incident
+    IM_WEBHOOK_TOKEN: local-webhook-token
+    # The browser reaches Keycloak on localhost, so that is the issuer in the tokens;
+    # the containers fetch the signing keys over the compose network.
+    IM_OIDC_ISSUER: http://localhost:8080/realms/incident
+    IM_OIDC_JWKS_URL: http://keycloak:8080/realms/incident/protocol/openid-connect/certs
+    IM_OIDC_AUDIENCE: incident-manager
+    IM_PUBLIC_URL: http://localhost:5174
+    IM_SMTP_HOST: mailpit
+    IM_SMTP_PORT: "1025"
+    IM_SMTP_STARTTLS: "false"
+    IM_SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+    IM_TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: incident
+      POSTGRES_PASSWORD: incident
+      POSTGRES_DB: incident
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U incident"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    volumes:
+      - ./deploy/compose/keycloak-realm.json:/opt/keycloak/data/import/incident-realm.json:ro
+    ports:
+      - "8080:8080"
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports:
+      - "8025:8025"
+
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "8104:8000"
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build: ./frontend
+    volumes:
+      - ./deploy/compose/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/compose/config.js:/usr/share/nginx/html/config.js:ro
+    depends_on:
+      - api
+    ports:
+      - "5174:8080"
+
+volumes:
+  postgres-data:

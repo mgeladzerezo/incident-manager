@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* TipTap renders a bare contenteditable; give its content readable defaults. */
+.postmortem-editor .tiptap {
+  @apply min-h-64 px-4 py-3 outline-none;
+}
+.postmortem-editor .tiptap h2 {
+  @apply mt-4 mb-2 text-lg font-semibold;
+}
+.postmortem-editor .tiptap p {
+  @apply my-2;
+}
+.postmortem-editor .tiptap ul {
+  @apply my-2 list-disc pl-6;
+}
+.postmortem-editor .tiptap ol {
+  @apply my-2 list-decimal pl-6;
+}
+.postmortem-editor .tiptap code {
+  @apply rounded bg-slate-100 px-1 font-mono text-sm;
+}

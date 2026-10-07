@@ -1,0 +1,81 @@
+{{- $component := dict "root" . "component" "worker" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "im.fullname" . }}-worker
+  labels:
+    {{- include "im.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "im.selectorLabels" $component | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "im.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "im.podSecurityContext" . | nindent 6 }}
+      {{- include "im.topologySpread" $component | nindent 6 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: worker
+          image: {{ include "im.backendImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "app.worker"]
+          ports:
+            - name: metrics
+              containerPort: 9100
+          {{- include "im.backendEnv" . | nindent 10 }}
+          # The metrics server runs in the worker process; if it stops answering, the
+          # process is gone or wedged. A stuck loop with a live process is caught by
+          # alerting on incident_manager_worker_last_tick_timestamp_seconds instead.
+          livenessProbe:
+            httpGet: { path: /metrics, port: metrics }
+            periodSeconds: 15
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          {{- include "im.containerSecurityContext" . | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "im.fullname" . }}-worker
+  labels:
+    {{- include "im.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  clusterIP: None
+  selector:
+    {{- include "im.selectorLabels" $component | nindent 4 }}
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: metrics
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "im.fullname" . }}-worker
+  labels:
+    {{- include "im.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.worker.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "im.selectorLabels" $component | nindent 6 }}

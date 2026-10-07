@@ -1,0 +1,131 @@
+# Prerequisites in the cluster: the CloudNativePG operator, an ingress controller, and
+# (optionally) the Prometheus operator for the ServiceMonitor/PodMonitor resources.
+
+image:
+  backend:
+    repository: ghcr.io/example/incident-manager-backend
+    tag: ""  # defaults to the chart appVersion
+  frontend:
+    repository: ghcr.io/example/incident-manager-frontend
+    tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Secret that must exist before install. Keys:
+#   webhook-token        (required) bearer token Alertmanager sends
+#   slack-bot-token      (optional)
+#   telegram-bot-token   (optional)
+#   smtp-password        (optional)
+existingSecret: incident-manager
+
+config:
+  publicUrl: https://incidents.example.com
+  oidcIssuer: https://keycloak.example.com/realms/incident
+  oidcAudience: incident-manager
+  oidcClientId: incident-manager
+  groupByLabels: alertname,service
+  smtp:
+    host: ""
+    port: 587
+    username: ""
+    from: incidents@example.com
+    starttls: true
+  workerPollSeconds: 5
+
+api:
+  replicas: 3
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 384Mi }
+  pdb:
+    minAvailable: 2
+
+worker:
+  # More than one replica is safe: rows are claimed with FOR UPDATE SKIP LOCKED.
+  replicas: 2
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+  pdb:
+    minAvailable: 1
+
+frontend:
+  replicas: 2
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 64Mi }
+  pdb:
+    minAvailable: 1
+
+# Applied to every Deployment. Zones are a hard requirement: losing one zone must not take
+# out all replicas of anything. Hosts are best effort.
+topologySpread:
+  zone:
+    maxSkew: 1
+    whenUnsatisfiable: DoNotSchedule
+  host:
+    maxSkew: 1
+    whenUnsatisfiable: ScheduleAnyway
+
+ingress:
+  enabled: true
+  className: nginx
+  host: incidents.example.com
+  annotations: {}
+  tls:
+    enabled: true
+    secretName: incident-manager-tls
+
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+
+postgres:
+  enabled: true
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+  database: incident
+  owner: incident
+  storage:
+    size: 20Gi
+    storageClass: ""
+  walStorage:
+    size: 5Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { memory: 1Gi }
+  # One synchronous standby: a committed transaction is on two nodes in two zones, so losing
+  # the primary loses no acknowledged writes.
+  syncReplicas: 1
+  # Upper bound on how long a WAL segment can sit unarchived. This bounds the data lost if
+  # every instance and volume is gone and the only thing left is S3.
+  archiveTimeout: 60s
+  podMonitor:
+    enabled: false
+
+  backup:
+    enabled: true
+    # s3://<bucket>/<prefix>; the bucket comes from deploy/terraform (output backup_bucket).
+    destinationPath: s3://CHANGE-ME-incident-manager-backups/cnpg
+    # Folder for this cluster's backups under destinationPath. A cluster restored from
+    # backup must use a new name so it never writes into the history it was restored from.
+    serverName: incident-db-v1
+    # IAM role assumed by the database pods through IRSA (terraform output backup_role_arn).
+    iamRoleArn: ""
+    retentionPolicy: 14d
+    schedule: "0 0 2 * * *"  # six fields: daily at 02:00 UTC
+
+  # Set enabled to create the cluster from the object store instead of an empty database.
+  # See docs/dr-drill.md.
+  recovery:
+    enabled: false
+    sourceServerName: ""
+    # RFC 3339 timestamp for point-in-time recovery; empty restores to the end of the WAL.
+    targetTime: ""
+
+# Used only when postgres.enabled is false: a secret with a `uri` key for an external database.
+externalDatabase:
+  existingSecret: ""

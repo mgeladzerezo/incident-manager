@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "im.fullname" . }}-migrate
+  labels:
+    {{- include "im.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # post-install rather than pre-install: on a first install the database cluster is part
+    # of this release and does not exist yet when pre-install hooks run. On upgrades the
+    # schema is migrated before the new pods roll out, so migrations must stay compatible
+    # with the previous application version.
+    helm.sh/hook: post-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  # Retries cover the minutes it takes CloudNativePG to bring up a new cluster.
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "im.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "im.podSecurityContext" . | nindent 6 }}
+      containers:
+        - name: migrate
+          image: {{ include "im.backendImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          {{- include "im.backendEnv" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          {{- include "im.containerSecurityContext" . | nindent 10 }}

@@ -1,0 +1,115 @@
+{{- if .Values.postgres.enabled }}
+{{- $pg := .Values.postgres -}}
+{{- if and $pg.recovery.enabled (not $pg.recovery.sourceServerName) }}
+{{- fail "postgres.recovery.sourceServerName is required when postgres.recovery.enabled is true" }}
+{{- end }}
+{{- if and $pg.recovery.enabled (eq $pg.recovery.sourceServerName $pg.backup.serverName) }}
+{{- fail "postgres.backup.serverName must differ from postgres.recovery.sourceServerName: a restored cluster must not archive into the history it was restored from" }}
+{{- end }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "im.dbClusterName" . }}
+  labels:
+    {{- include "im.labels" . | nindent 4 }}
+spec:
+  instances: {{ $pg.instances }}
+  imageName: {{ $pg.imageName }}
+  primaryUpdateStrategy: unsupervised
+
+  minSyncReplicas: {{ $pg.syncReplicas }}
+  maxSyncReplicas: {{ $pg.syncReplicas }}
+
+  postgresql:
+    parameters:
+      archive_timeout: {{ $pg.archiveTimeout | quote }}
+
+  # One instance per zone, enforced: a replica in the same zone as the primary does not
+  # protect against losing that zone.
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: topology.kubernetes.io/zone
+
+  storage:
+    size: {{ $pg.storage.size }}
+    {{- with $pg.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  walStorage:
+    size: {{ $pg.walStorage.size }}
+    {{- with $pg.walStorage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+
+  resources:
+    {{- toYaml $pg.resources | nindent 4 }}
+
+  bootstrap:
+    {{- if $pg.recovery.enabled }}
+    recovery:
+      source: origin
+      database: {{ $pg.database }}
+      owner: {{ $pg.owner }}
+      {{- with $pg.recovery.targetTime }}
+      recoveryTarget:
+        targetTime: {{ . | quote }}
+      {{- end }}
+    {{- else }}
+    initdb:
+      database: {{ $pg.database }}
+      owner: {{ $pg.owner }}
+    {{- end }}
+
+  {{- if $pg.recovery.enabled }}
+  externalClusters:
+    - name: origin
+      barmanObjectStore:
+        destinationPath: {{ $pg.backup.destinationPath }}
+        serverName: {{ $pg.recovery.sourceServerName }}
+        s3Credentials:
+          inheritFromIAMRole: true
+        wal:
+          maxParallel: 4
+  {{- end }}
+
+  {{- if $pg.backup.enabled }}
+  # Continuous WAL archiving plus base backups to S3. Together they allow restoring to any
+  # point in time inside the retention window.
+  backup:
+    retentionPolicy: {{ $pg.backup.retentionPolicy | quote }}
+    barmanObjectStore:
+      destinationPath: {{ $pg.backup.destinationPath }}
+      serverName: {{ $pg.backup.serverName }}
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+        maxParallel: 2
+      data:
+        compression: gzip
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        eks.amazonaws.com/role-arn: {{ required "postgres.backup.iamRoleArn is required when backups are enabled" $pg.backup.iamRoleArn | quote }}
+  {{- end }}
+
+  monitoring:
+    enablePodMonitor: {{ $pg.podMonitor.enabled }}
+{{- if $pg.backup.enabled }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ include "im.dbClusterName" . }}-daily
+  labels:
+    {{- include "im.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $pg.backup.schedule | quote }}
+  # Take a base backup right after the cluster is created, so PITR works from day one.
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: {{ include "im.dbClusterName" . }}
+{{- end }}
+{{- end }}

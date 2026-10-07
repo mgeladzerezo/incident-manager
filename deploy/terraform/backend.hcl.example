@@ -1,0 +1,4 @@
+bucket         = "my-terraform-state-bucket"
+key            = "incident-manager/terraform.tfstate"
+region         = "eu-central-1"
+dynamodb_table = "terraform-locks"

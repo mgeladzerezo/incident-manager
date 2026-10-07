@@ -1,0 +1,11 @@
+name   = "incident-manager"
+region = "eu-central-1"
+
+# Restrict to the ranges that need kubectl access.
+api_public_access_cidrs = ["203.0.113.0/24"]
+
+# Must match the Helm release: namespace, and "<release fullname>-db" as the name.
+database_service_account = {
+  namespace = "incident-manager"
+  name      = "incident-manager-db"
+}
